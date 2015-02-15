@@ -1,25 +1,148 @@
 ---
 title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
----
+output: html_document
+keep_md: true
+author: "Jennifer Mollon"
+date: "14 February 2015"
 
+---
 
 ## Loading and preprocessing the data
 
+Unzip and read in data, and take a look at the structure. The unzip step is commented out, as this only needs to be done the first time the script is run. From then on it just needs to be loaded from the local file.
 
+```{r download_and_read}
+#unzip ("activity.zip")
+dat=read.csv("activity.csv")
+```
+
+The structure is a `r dim(dat)[2]`-column data frame, with column names `r names(dat)`. 
+There are `r dim(dat)[1]` entries (rows).
+Reformat the date, and investigate the data
+
+```{r investigate_data}
+dat$date=as.Date(dat$date)
+head(dat)
+sum(is.na(dat))
+summary(dat)
+length(unique(dat$date))
+length(unique(dat$steps))
+length(unique(dat$interval))
+```
 
 ## What is mean total number of steps taken per day?
+  
+For this part of the assignment, we are told we can ignore missing data. 
+I will remove it from my data frame and work with this for this section.
 
+
+```{r mean_steps_per_day}
+dat_no_na=na.omit(dat)
+total_steps_per_day=aggregate(dat_no_na$steps,by=list(dat_no_na$date),FUN=sum) #sum steps over days
+hist(total_steps_per_day$x,main="Histogram of total steps per day",xlab="Steps per day") #plots steps per day
+mean_steps_per_day=mean(total_steps_per_day$x) #calculate mean steps per day
+median_steps_per_day=median(total_steps_per_day$x) #calculate median steps per day
+```
+
+The mean and median steps per day are `r format(mean_steps_per_day)` and `r median_steps_per_day`, respectively.
 
 
 ## What is the average daily activity pattern?
 
+```{r time_series_steps_by_interval}
+steps_by_interval=aggregate(dat_no_na$steps,by=list(dat_no_na$interval),FUN=mean) #calculate mean steps by interval across all days
+names(steps_by_interval)=c("Interval","Steps") #name columns in resulting data frame
+plot(steps_by_interval,type="l",main="Mean steps (all days) by 5-minute interval",xlab="Minute",ylab="Number of steps") #plot time series
+
+```
+
+```{r max_steps_interval}
+max_steps_interval=steps_by_interval[which.max(steps_by_interval$Steps),] #find interval with maximum steps averaged across days
+#find the hours and minutes for the start and end of that interval
+interval_start_hour=(max_steps_interval$Interval)%/%60 
+interval_start_minute=(max_steps_interval$Interval)%%60
+interval_end_hour=(max_steps_interval$Interval+5)%/%60
+interval_end_minute=(max_steps_interval$Interval+5)%%60
+#load string formatting library, then concatenate and format the start and end times
+library(stringr)
+start=paste(interval_start_hour,":",str_pad(interval_end_minute, 2, pad = "0"),sep="")
+end=paste(interval_end_hour,":",str_pad(interval_end_minute, 2, pad = "0"),sep="")
+```
+
+The 5-minute interval with the most steps was the one which started at the `r max_steps_interval$Interval`th minute. This corresponds to the time period between `r start` and `r end`. This interval had an average of `r round(max_steps_interval$Steps,2)` steps. 
 
 
 ## Imputing missing values
 
+```{r}
+#This checks for 'any' NAs in each row, then sums those values to get the number of rows with any missing elements 
+nrows_with_NAs=sum(apply(dat,1,FUN=function(x){any(is.na(x))}))
+#Check if all missing values are in first column (e.g. steps)
+apply(dat,2,FUN=function(x){any(is.na(x))})
+```
+
+There are a total of `r nrows_with_NAs` rows with NA values, all in the first column (steps).
+Replace the NAs with the mean for that 5-minute interval
+On the left of the '<-', identify the positions (row number) with the missing values
+On the right, get the interval value from these row numbers and find the row number of the matching interval value in steps_by_intervals, returning the mean number of steps for that interval
+
+```{r fill_in_missing}
+dat_fill_in_missing=dat #Make a copy of the original, to fill in missing values
+#now identify missing data and fill in with mean for that value's interval
+dat_fill_in_missing$steps[is.na(dat_fill_in_missing$steps)]<-steps_by_interval$Steps[match(dat_fill_in_missing$interval[is.na(dat_fill_in_missing$steps)],steps_by_interval$Interval)]
+```
+
+Now recreate the histogram and recalculate the mean and median as above, but with the missing data filled in with the interval mean.
+
+```{r mean_steps_per_day_no_missing_values}
+#recalculate steps per day from the data with no missing values and plot
+total_steps_per_day_no_missing=aggregate(dat_fill_in_missing$steps,by=list(dat_fill_in_missing$date),FUN=sum) 
+hist(total_steps_per_day_no_missing$x,main="Histogram of total steps per day, no missing data",xlab="Steps per day")
+#calculate mean and median steps per day from data with no missing values
+mean_steps_per_day_no_missing=mean(total_steps_per_day_no_missing$x)
+median_steps_per_day_no_missing=median(total_steps_per_day_no_missing$x)
+```
+
+The mean steps per day with missing values, and with missing values replaced by the interval's mean, are both `r format(mean_steps_per_day_no_missing,2)`. As expected, the overall mean does not change when missing values are replaced by the mean. However the median value does change, from `r median_steps_per_day` to the mean value of `r format(median_steps_per_day_no_missing,2)`. This is because all of the relaced missing values are now clustered in the middle of the data distribution. One of these mean values in the centre of the distribution therefore becomes the new median. 
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+First create a column in the data frame to hold the factor 'day_type', with the value 'weekend' for Saturday and Sunday, and 'weekday' for all other days. 
+
+```{r weekdays_and_weekends}
+#create empty vector to hold values of 'day_type', which can be weekday or weekend
+dat_fill_in_missing$day_type=vector("character",length=length(dat_fill_in_missing$date))
+#check if the name of the day is in the set ("Saturday","Sunday"). If yes, assign the value "weekend" to day_type, otherwise assign "weekday"
+dat_fill_in_missing$day_type[weekdays(dat_fill_in_missing$date) %in% c("Saturday","Sunday")] = "weekend"
+dat_fill_in_missing$day_type[!weekdays(dat_fill_in_missing$date) %in% c("Saturday","Sunday")] = "weekday"
+#convert the character vector to a factor
+dat_fill_in_missing$day_type=as.factor(dat_fill_in_missing$day_type)
+```
+
+
+
+
+```{r calculate_steps_by_interval_weekdays_and_weekends}
+#calcualte mean steps per interval separately for weekdays and weekends
+steps_by_interval_weekdays=aggregate(dat_fill_in_missing$steps[dat_fill_in_missing$day_type=="weekday"],by=list(dat_fill_in_missing$interval[dat_fill_in_missing$day_type=="weekday"]),FUN=mean)
+steps_by_interval_weekends=aggregate(dat_fill_in_missing$steps[dat_fill_in_missing$day_type=="weekend"],by=list(dat_fill_in_missing$interval[dat_fill_in_missing$day_type=="weekend"]),FUN=mean)
+#assign column names to each resulting data frame
+names(steps_by_interval_weekdays)=c("Interval","Steps")
+names(steps_by_interval_weekends)=c("Interval","Steps")
+
+```
+
+Now plot the intervals separately for weekdays and weekends. For ease of comparison, find the maximum value for the y-axis and use this to set a sensible y-axis limit for both plots - I chose the maximum value + 10%, so the maximum value is not quite touching the top of the plot.
+
+```{r plot_weekdays_and_weekends}
+#set the layout to get the 2 plots together, one above the other (e.g. in 2 rows, 1 column)
+par(mfrow=c(2,1))
+#find max value of the mean steps by interval and use it to create the range limits for the y-axis
+y_range=c(1,1.1*(max(steps_by_interval[,2])))
+#plot a times series for mean steps per interval for weekdays and weekends
+plot(steps_by_interval_weekdays,type="l",main="Weekdays",xlab="Interval",ylab="Number of steps",ylim=y_range)
+plot(steps_by_interval_weekends,type="l",main="Weekends",xlab="Interval",ylab="Number of steps",ylim=y_range)
+
+```
+
